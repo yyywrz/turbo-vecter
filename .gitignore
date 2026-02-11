@@ -21,6 +21,8 @@ yarn-error.log*
 
 # local env files
 .env*.local
+.env
+.env.*
 
 out/
 build/
@@ -28,6 +30,13 @@ dist/
 
 # plasmo
 .plasmo
+
+# editor
+.vscode/
+.idea/
+
+# logs
+*.log
 
 # typescript
 .tsbuildinfo

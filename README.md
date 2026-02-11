@@ -1,33 +1,22 @@
-This is a [Plasmo extension](https://docs.plasmo.com/) project bootstrapped with [`plasmo init`](https://www.npmjs.com/package/plasmo).
+# Turbo‑Vecter
 
-## Getting Started
+Turbo‑Vecter is a sci‑fi cursor enhancement that turns every page into a high‑energy UI experience. Pick a mode and watch your pointer leave trails, pulses, and electric arcs without interrupting your browsing.
 
-First, run the development server:
+## Why you’ll like it
+- **Instant visual feedback**: movement and hover both respond with distinct effects.
+- **Cinematic feel**: smooth trails, neon glow, and lightning‑style arcs.
+- **Zero friction**: runs on any page, no setup after install.
 
-```bash
-pnpm dev
-# or
-npm run dev
-```
+## Modes
+- **Off** — Disable all effects with one tap.
+- **Magnetic** — Expanding ripple rings radiate from the pointer, while hovered elements subtly enlarge.
+- **Light** — A lightsaber‑style trail follows your cursor; hovered elements glow and intensify over time.
+- **Electric** — Arc segments crackle on movement; when hovering, a lightning strike drops from the top toward the target.
 
-Open your browser and load the appropriate development build. For example, if you are developing for the chrome browser, using manifest v3, use: `build/chrome-mv3-dev`.
+## How it behaves
+- **Moving**: each mode renders its own signature motion effect.
+- **Hovering**: elements react with mode‑specific highlights (glow, scale, or strikes).
+- **Idle**: effects wind down automatically to stay lightweight.
 
-You can start editing the popup by modifying `popup.tsx`. It should auto-update as you make changes. To add an options page, simply add a `options.tsx` file to the root of the project, with a react component default exported. Likewise to add a content page, add a `content.ts` file to the root of the project, importing some module and do some logic, then reload the extension on your browser.
-
-For further guidance, [visit our Documentation](https://docs.plasmo.com/)
-
-## Making production build
-
-Run the following:
-
-```bash
-pnpm build
-# or
-npm run build
-```
-
-This should create a production bundle for your extension, ready to be zipped and published to the stores.
-
-## Submit to the webstores
-
-The easiest way to deploy your Plasmo extension is to use the built-in [bpp](https://bpp.browser.market) GitHub action. Prior to using this action however, make sure to build your extension and upload the first version to the store to establish the basic credentials. Then, simply follow [this setup instruction](https://docs.plasmo.com/framework/workflows/submit) and you should be on your way for automated submission!
+## Privacy
+Turbo‑Vecter stores only your selected effect and language in extension storage. No analytics or tracking. See [PRIVACY.md](PRIVACY.md).
