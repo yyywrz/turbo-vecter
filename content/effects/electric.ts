@@ -13,6 +13,17 @@ const electric: EffectDefinition = {
 
     .turbo-vecter-hover-electric {
     }
+
+    @keyframes turbo-vecter-electric-pulse {
+      0% {
+        transform: scale(1);
+        opacity: 1;
+      }
+      100% {
+        transform: scale(1.02);
+        opacity: 0.95;
+      }
+    }
   `
 }
 

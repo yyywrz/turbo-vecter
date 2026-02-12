@@ -12,6 +12,27 @@ try {
 
 console.log("[Turbo‑Vecter] content.ts loaded")
 
+// Handle extension context invalidation errors globally
+const handleContextError = (error: ErrorEvent) => {
+  if (error.message?.includes?.("context invalidated")) {
+    console.warn("[Turbo‑Vecter] Extension context invalidated (expected on reload)")
+    error.preventDefault()
+    return true
+  }
+  return false
+}
+
+window.addEventListener("error", (event) => {
+  handleContextError(event)
+}, true)
+
+window.addEventListener("unhandledrejection", (event) => {
+  if (event.reason?.message?.includes?.("context invalidated")) {
+    console.warn("[Turbo‑Vecter] Extension context invalidated in promise (expected on reload)")
+    event.preventDefault()
+  }
+}, true)
+
 const init = () => {
   console.log("[Turbo‑Vecter] content.ts init")
   try {

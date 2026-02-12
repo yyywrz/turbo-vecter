@@ -12,28 +12,6 @@ const magnetic: EffectDefinition = {
     }
 
     .turbo-vecter-hover-magnetic {
-      transform-origin: center;
-      animation: turbo-vecter-magnetic-snap 900ms ease-out;
-      transition: transform 900ms ease-out !important;
-      transform: scale(1.08);
-    }
-
-    @keyframes turbo-vecter-magnetic-snap {
-      0% {
-        transform: scale(1);
-      }
-      25% {
-        transform: scale(1.02);
-      }      
-      50% {
-        transform: scale(1.04);
-      }
-      75% {
-        transform: scale(1.06);
-      }
-      100% {
-        transform: scale(1.08);
-      }
     }
   `
 }

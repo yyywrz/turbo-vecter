@@ -20,6 +20,22 @@ class LightCanvas {
   private snakeFrameId: number | null = null
   private snakeElement: Element | null = null
   private snakeCompletedFirstLoop = false
+  private scrollListener: (() => void) | null = null
+  private snakeSpeedMultiplier = 1
+  private pendingTimeouts: number[] = []
+
+  private safeExecute<T>(fn: () => T): T | undefined {
+    try {
+      return fn()
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('context')) {
+        this.cleanup()
+        return undefined
+      }
+      console.warn('[Turbo‑Vecter] Safe execute error:', error)
+      return undefined
+    }
+  }
 
   ensure(): HTMLCanvasElement {
     if (this.canvas) return this.canvas
@@ -156,6 +172,11 @@ class LightCanvas {
   cleanup(): void {
     this.stop()
     this.stopSnake()
+
+    // Clear all pending timeouts
+    this.pendingTimeouts.forEach(id => window.clearTimeout(id))
+    this.pendingTimeouts.length = 0
+
     if (this.canvas?.parentElement) {
       this.canvas.parentElement.removeChild(this.canvas)
     }
@@ -163,10 +184,36 @@ class LightCanvas {
     this.ctx = null
   }
 
+  private isElementInViewport(element: Element): boolean {
+    const rect = element.getBoundingClientRect()
+    return rect.top < window.innerHeight && rect.bottom > 0 && rect.left < window.innerWidth && rect.right > 0
+  }
+
+  private calculateSpeedMultiplier(element: Element): number {
+    const rect = element.getBoundingClientRect()
+    const offset = 8
+    const w = rect.width + offset * 2
+    const h = rect.height + offset * 2
+    const perimeter = 2 * (w + h)
+    
+    // Speed increases with element size
+    // Small element (perimeter ~100): 0.5x speed
+    // Medium element (perimeter ~400): 1x speed
+    // Large element (perimeter ~1000): 2x speed
+    // Formula: 0.5 + (perimeter / 800)
+    return Math.max(0.5, 0.5 + perimeter / 800)
+  }
+
   private drawSnakeRing(element: Element): void {
     if (!this.ctx) return
     
     const rect = element.getBoundingClientRect()
+    // Stop if element is out of viewport
+    if (!this.isElementInViewport(element)) {
+      this.stopSnake()
+      return
+    }
+    
     const offset = 8 // Distance from element border
     const x = rect.left - offset
     const y = rect.top - offset
@@ -219,11 +266,12 @@ class LightCanvas {
       const p1 = getPointOnBorder(distance)
       const p2 = getPointOnBorder(nextDistance)
       
-      // Simple fade from head to tail
-      const alpha = Math.pow(1 - t, 0.8)
+      // Smooth fade from head to tail
+      const alpha = Math.pow(1 - t, 1.2)
       
       this.ctx.strokeStyle = `rgba(100, 200, 255, ${alpha})`
       this.ctx.lineWidth = 3
+      this.ctx.globalAlpha = alpha
       
       this.ctx.beginPath()
       this.ctx.moveTo(p1.x, p1.y)
@@ -231,6 +279,7 @@ class LightCanvas {
       this.ctx.stroke()
     }
     
+    this.ctx.globalAlpha = 1
     this.ctx.shadowBlur = 0
   }
 
@@ -239,22 +288,37 @@ class LightCanvas {
     this.snakeElement = element
     this.snakeAngle = 0 // Start from top-left corner (distance = 0)
     this.snakeCompletedFirstLoop = false
+    this.snakeSpeedMultiplier = this.calculateSpeedMultiplier(element)
     this.ensure()
     
     if (this.animationFrameId === null) {
       this.start()
     }
     
-    const animate = () => {
-      if (!this.ctx || !this.snakeElement) {
-        this.snakeFrameId = null
-        return
+    // Add scroll listener to detect page scroll
+    if (!this.scrollListener) {
+      this.scrollListener = () => {
+        this.safeExecute(() => {
+          if (this.snakeElement) {
+            this.stopSnake()
+          }
+        })
       }
-      
-      this.drawSnakeRing(this.snakeElement)
-      this.snakeAngle += 2 // Move 2 pixels per frame
-      
-      this.snakeFrameId = window.requestAnimationFrame(animate)
+      window.addEventListener("scroll", this.scrollListener, { passive: true })
+    }
+    
+    const animate = () => {
+      this.safeExecute(() => {
+        if (!this.ctx || !this.snakeElement) {
+          this.snakeFrameId = null
+          return
+        }
+        
+        this.drawSnakeRing(this.snakeElement)
+        this.snakeAngle += 2 * this.snakeSpeedMultiplier // Speed varies with element size
+        
+        this.snakeFrameId = window.requestAnimationFrame(animate)
+      })
     }
     
     this.snakeFrameId = window.requestAnimationFrame(animate)
@@ -268,9 +332,19 @@ class LightCanvas {
     if (this.snakeElement instanceof HTMLElement) {
       this.snakeElement.style.boxShadow = ""
     }
+    if (this.scrollListener) {
+      window.removeEventListener("scroll", this.scrollListener, { passive: true })
+      this.scrollListener = null
+    }
+
+    // Clear all pending timeouts
+    this.pendingTimeouts.forEach(id => window.clearTimeout(id))
+    this.pendingTimeouts.length = 0
+
     this.snakeElement = null
     this.snakeAngle = 0
     this.snakeCompletedFirstLoop = false
+    this.snakeSpeedMultiplier = 1
   }
 
   isSnakeRunning(): boolean {
