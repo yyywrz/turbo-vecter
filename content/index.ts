@@ -1,10 +1,10 @@
 import {
-  allHoverClasses,
   allMovingClasses,
   effectRegistry,
   ensureEffectStyles
 } from "./effects"
 import type { EffectType } from "./effects/types"
+import { lightCanvas } from "./lightCanvas"
 
 try {
   document.documentElement.setAttribute("data-turbo-vecter-module", "loaded")
@@ -17,27 +17,30 @@ console.log("[Turbo‑Vecter] Content script module loaded")
 const STILL_DELAY = 140
 const DEFAULT_EFFECT: EffectType = "off"
 const STORAGE_KEY = "turboEffect"
-const LIGHT_CANVAS_ID = "turbo-vecter-light-canvas"
 const MAGNETIC_CANVAS_ID = "turbo-vecter-magnetic-canvas"
 const ELECTRIC_CANVAS_ID = "turbo-vecter-electric-canvas"
 const MIN_ACTIVE_DISTANCE = 12
 const SPAWN_DISTANCE = 8
 const IDLE_TIMEOUT = 2000
-const HOVER_CHARGE_DELAY = 20000
-const TRAIL_FADE = "rgba(0, 0, 0, 0.06)"
-const TRAIL_COLOR = "rgba(160, 230, 255, 1)"
-const TRAIL_GLOW_COLOR = "rgba(90, 180, 255, 0.9)"
-const TRAIL_WIDTH = 8
-const TRAIL_INNER_WIDTH = 3
 const MAGNETIC_RIPPLE_INTERVAL = 260
-const MAGNETIC_RIPPLE_SPEED = 0.2
-const MAGNETIC_RIPPLE_MAX = 20
-const MAGNETIC_RIPPLE_FADE = 0.012
+const MAGNETIC_RIPPLE_SPEED = 0.01
+const MAGNETIC_RIPPLE_MAX = 15
+const MAGNETIC_RIPPLE_FADE =  0.001
+const MAGNETIC_WAVE_INTERVAL = 300
+const MAGNETIC_CHARGE_DELAY = 800
+const MAGNETIC_CURSOR_CIRCLE_RADIUS = 28
+const MAGNETIC_CURSOR_ROTATION_SPEED = 0.04
 const ELECTRIC_ARC_FADE = "rgba(0, 0, 0, 0.18)"
 const ELECTRIC_MAX_ARCS = 24
 const ELECTRIC_SPAWN_INTERVAL = 70
 const ELECTRIC_JITTER = 16
-const ELECTRIC_HOVER_INTERVAL = 180
+const ELECTRIC_HOVER_INTERVAL = 800
+const ELECTRIC_HOVER_HIT_DURATION = 600
+const ELECTRIC_HOVER_CHARGE_DURATION = 1200
+const ELECTRIC_HOVER_PAUSE_BEFORE_DISCHARGE = 600
+const ELECTRIC_HOVER_DISCHARGE_DURATION = 1500
+const ELECTRIC_HOVER_PAUSE_AFTER_DISCHARGE = 2000
+const ELECTRIC_DISCHARGE_COUNT = 6
 const ELECTRIC_MOVE_ARC_COUNT = 3
 const ELECTRIC_MOVE_SEGMENTS = 7
 const ELECTRIC_HOVER_SEGMENTS = 5
@@ -76,26 +79,6 @@ const clearMovingEffect = () => {
   removeClasses(document.body, allMovingClasses)
 }
 
-const applyHoverEffect = (element: Element | null, effect: EffectType) => {
-  if (!element) return
-  removeClasses(element, allHoverClasses)
-  addClass(element, effectRegistry[effect].classNames.hover)
-}
-
-const applyChargedHoverEffect = (element: Element | null, effect: EffectType) => {
-  if (!element || effect !== "light") return
-  element.classList.add("turbo-vecter-hover-light-charged")
-}
-
-const clearChargedHoverEffect = (element: Element | null) => {
-  if (!element) return
-  element.classList.remove("turbo-vecter-hover-light-charged")
-}
-
-const clearHoverEffect = (element: Element | null) => {
-  removeClasses(element, allHoverClasses)
-}
-
 const setupCursorEffects = () => {
   console.log("[Turbo‑Vecter] Content script initialized")
   try {
@@ -115,27 +98,28 @@ const setupCursorEffects = () => {
   let lastMagneticPosition: { x: number; y: number } | null = null
   let stillTimeout: number | undefined
   let isMoving = false
-  let animationFrameId: number | null = null
-  let idleTimeout: number | undefined
-  let hoverChargeTimeout: number | undefined
-  let canvas: HTMLCanvasElement | null = null
-  let ctx: CanvasRenderingContext2D | null = null
-  let canvasSize = { width: 0, height: 0 }
   let magneticCanvas: HTMLCanvasElement | null = null
   let magneticCtx: CanvasRenderingContext2D | null = null
   let magneticFrameId: number | null = null
   let magneticCanvasSize = { width: 0, height: 0 }
   let magneticLastRipple = 0
+  let magneticLastWave = 0
+  let magneticHoverTarget: Element | null = null
+  let magneticWaveInterval: number | undefined
+  let magneticChargeTimeout: number | undefined
+  let magneticCursorRotation = 0
   const magneticRipples: Ripple[] = []
   let electricCanvas: HTMLCanvasElement | null = null
   let electricCtx: CanvasRenderingContext2D | null = null
   let electricFrameId: number | null = null
   let electricCanvasSize = { width: 0, height: 0 }
   let electricLastSpawn = 0
-  let electricHoverInterval: number | undefined
+  let electricHoverTimeout: number | undefined
+  let electricHoverState: 'idle' | 'striking' | 'hit' | 'discharging' = 'idle'
+  let electricHoverTarget: Element | null = null
+  let electricHitPoint: { x: number; y: number } | null = null
   const electricArcs: Arc[] = []
-  let debugStarted = false
-  let debugDrawn = false
+  const electricHitSparks: Array<{ x: number; y: number; vx: number; vy: number; life: number }> = []
 
   const scheduleStill = () => {
     if (stillTimeout) {
@@ -150,20 +134,18 @@ const setupCursorEffects = () => {
       }
 
       const target = document.elementFromPoint(lastPosition.x, lastPosition.y)
-      if (target && target !== lastTarget) {
-        clearHoverEffect(lastTarget)
-        clearChargedHoverEffect(lastTarget)
-        if (hoverChargeTimeout) {
-          window.clearTimeout(hoverChargeTimeout)
+      if (currentEffect === "light" && target) {
+        // Start snake only if we don't already have one running on this element
+        if (target !== lastTarget || !lightCanvas.isSnakeRunning()) {
+          lastTarget = target
+          lightCanvas.startSnake(lastTarget)
         }
+      } else if (target && target !== lastTarget) {
         lastTarget = target
       }
-      applyHoverEffect(lastTarget, currentEffect)
-
-      if (currentEffect === "light" && lastTarget) {
-        hoverChargeTimeout = window.setTimeout(() => {
-          applyChargedHoverEffect(lastTarget, currentEffect)
-        }, HOVER_CHARGE_DELAY)
+      if (currentEffect === "magnetic" && lastTarget) {
+        startMagneticCanvas()
+        startMagneticHoverWaves(lastTarget)
       }
       if (currentEffect === "electric" && lastTarget) {
         startElectricCanvas()
@@ -184,136 +166,14 @@ const setupCursorEffects = () => {
     }
 
     if (currentEffect !== "light") {
-      stopLightCanvas()
+      lightCanvas.stop()
+      lightCanvas.stopSnake()
     }
     if (currentEffect !== "magnetic") {
       stopMagneticEffect()
     }
     if (currentEffect !== "electric") {
       stopElectricEffect()
-    }
-  }
-
-  const ensureLightCanvas = () => {
-    if (canvas) return canvas
-    const existing = document.getElementById(LIGHT_CANVAS_ID)
-    if (existing instanceof HTMLCanvasElement) {
-      canvas = existing
-    } else {
-      canvas = document.createElement("canvas")
-      canvas.id = LIGHT_CANVAS_ID
-      canvas.className = "turbo-vecter-light-canvas"
-      const host = document.documentElement
-      host.appendChild(canvas)
-      if (DEBUG) {
-        console.log("[Turbo‑Vecter] Canvas appended", host.tagName)
-      }
-    }
-    canvas.style.setProperty("position", "fixed", "important")
-    canvas.style.setProperty("inset", "0", "important")
-    canvas.style.setProperty("top", "0", "important")
-    canvas.style.setProperty("left", "0", "important")
-    canvas.style.setProperty("width", "100%", "important")
-    canvas.style.setProperty("height", "100%", "important")
-    canvas.style.setProperty("display", "block", "important")
-    canvas.style.setProperty("visibility", "visible", "important")
-    canvas.style.setProperty("opacity", "1", "important")
-    canvas.style.setProperty("pointer-events", "none", "important")
-    canvas.style.setProperty("z-index", "2147483647", "important")
-    canvas.style.setProperty("background", "transparent", "important")
-    ctx = canvas.getContext("2d")
-    if (DEBUG && !ctx) {
-      console.warn("[Turbo‑Vecter] Canvas context not available")
-    }
-    resizeCanvas()
-    return canvas
-  }
-
-  const resizeCanvas = () => {
-    if (!canvas) return
-    const dpr = window.devicePixelRatio || 1
-    const width = Math.max(window.innerWidth, document.documentElement.clientWidth)
-    const height = Math.max(window.innerHeight, document.documentElement.clientHeight)
-    canvas.width = width * dpr
-    canvas.height = height * dpr
-    canvas.style.width = `${width}px`
-    canvas.style.height = `${height}px`
-    canvasSize = { width, height }
-    if (ctx) {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-      ctx.clearRect(0, 0, width, height)
-    }
-    if (DEBUG) {
-      console.log("[Turbo‑Vecter] Canvas resized", canvasSize, { dpr })
-    }
-  }
-
-  const stopLightCanvas = () => {
-    if (animationFrameId !== null) {
-      window.cancelAnimationFrame(animationFrameId)
-      animationFrameId = null
-    }
-    if (idleTimeout) {
-      window.clearTimeout(idleTimeout)
-      idleTimeout = undefined
-    }
-    lastDrawPosition = null
-    if (ctx) {
-      ctx.clearRect(0, 0, canvasSize.width, canvasSize.height)
-    }
-  }
-
-  const startLightCanvas = () => {
-    if (animationFrameId !== null) return
-    ensureLightCanvas()
-
-    if (DEBUG && !debugStarted) {
-      console.log("[Turbo‑Vecter] Light canvas started")
-      debugStarted = true
-    }
-
-    const render = () => {
-      if (!ctx) {
-        animationFrameId = null
-        return
-      }
-
-      ctx.globalCompositeOperation = "destination-out"
-      ctx.fillStyle = TRAIL_FADE
-      ctx.fillRect(0, 0, canvasSize.width, canvasSize.height)
-      ctx.globalCompositeOperation = "source-over"
-
-      animationFrameId = window.requestAnimationFrame(render)
-    }
-
-    animationFrameId = window.requestAnimationFrame(render)
-  }
-
-  const drawLightTrail = (from: { x: number; y: number }, to: { x: number; y: number }) => {
-    if (!ctx) return
-    ctx.lineCap = "round"
-    ctx.lineJoin = "round"
-
-    ctx.strokeStyle = TRAIL_GLOW_COLOR
-    ctx.lineWidth = TRAIL_WIDTH
-    ctx.shadowBlur = 24
-    ctx.shadowColor = "rgba(120, 200, 255, 0.95)"
-    ctx.beginPath()
-    ctx.moveTo(from.x, from.y)
-    ctx.lineTo(to.x, to.y)
-    ctx.stroke()
-
-    ctx.shadowBlur = 0
-    ctx.strokeStyle = TRAIL_COLOR
-    ctx.lineWidth = TRAIL_INNER_WIDTH
-    ctx.beginPath()
-    ctx.moveTo(from.x, from.y)
-    ctx.lineTo(to.x, to.y)
-    ctx.stroke()
-
-    if (DEBUG && !debugDrawn) {
-      console.log("[Turbo‑Vecter] Drew light trail", { from, to })
-      debugDrawn = true
     }
   }
 
@@ -368,12 +228,23 @@ const setupCursorEffects = () => {
     }
   }
 
-  const spawnMagneticRipple = (x: number, y: number) => {
+  const spawnMagneticWave = (element: Element) => {
+    if (!(element instanceof HTMLElement)) return
+    const rect = element.getBoundingClientRect()
+    const centerX = rect.left + rect.width / 2
+    const centerY = rect.top + rect.height / 2
+    // Start radius to ensure wave starts from border edges
+    // Use the larger dimension to ensure coverage from all border points
+    const startRadius = Math.max(
+      Math.hypot(rect.width / 2, rect.height / 2), // diagonal to corner
+      Math.max(rect.width / 2, rect.height / 2)    // to edge midpoint
+    )
+    
     magneticRipples.unshift({
-      x,
-      y,
-      radius: 12,
-      alpha: 0.9
+      x: centerX,
+      y: centerY,
+      radius: startRadius,
+      alpha: 0.95
     })
     if (magneticRipples.length > MAGNETIC_RIPPLE_MAX) {
       magneticRipples.pop()
@@ -391,32 +262,40 @@ const setupCursorEffects = () => {
       }
       magneticCtx.clearRect(0, 0, magneticCanvasSize.width, magneticCanvasSize.height)
 
+      // Update cursor rotation
+      magneticCursorRotation += MAGNETIC_CURSOR_ROTATION_SPEED
+
+      magneticRipples.forEach((ripple) => {
+        ripple.radius += MAGNETIC_RIPPLE_SPEED
+        ripple.alpha -= MAGNETIC_RIPPLE_FADE
+      })
+
+      for (let i = magneticRipples.length - 1; i >= 0; i -= 1) {
+        if (magneticRipples[i].alpha <= 0) {
+          magneticRipples.splice(i, 1)
+        }
+      }
+
+      magneticCtx.lineWidth = 2
+      magneticRipples.forEach((ripple) => {
+        magneticCtx.strokeStyle = `rgba(140, 220, 255, ${ripple.alpha})`
+        magneticCtx.beginPath()
+        magneticCtx.arc(ripple.x, ripple.y, ripple.radius, 0, Math.PI * 2)
+        magneticCtx.stroke()
+      })
+
+      // Draw rotating dashed circle around cursor
       if (lastMagneticPosition) {
-        if (time - magneticLastRipple > MAGNETIC_RIPPLE_INTERVAL) {
-          spawnMagneticRipple(lastMagneticPosition.x, lastMagneticPosition.y)
-          magneticLastRipple = time
-        }
-
-        magneticRipples.forEach((ripple) => {
-          ripple.radius += MAGNETIC_RIPPLE_SPEED
-          ripple.alpha -= MAGNETIC_RIPPLE_FADE
-        })
-
-        for (let i = magneticRipples.length - 1; i >= 0; i -= 1) {
-          if (magneticRipples[i].alpha <= 0) {
-            magneticRipples.splice(i, 1)
-          }
-        }
-
+        magneticCtx.save()
+        magneticCtx.translate(lastMagneticPosition.x, lastMagneticPosition.y)
+        magneticCtx.rotate(magneticCursorRotation)
+        magneticCtx.setLineDash([8, 8])
         magneticCtx.lineWidth = 2
-        magneticCtx.setLineDash([4, 6])
-        magneticRipples.forEach((ripple) => {
-          magneticCtx.strokeStyle = `rgba(140, 220, 255, ${ripple.alpha})`
-          magneticCtx.beginPath()
-          magneticCtx.arc(ripple.x, ripple.y, ripple.radius, 0, Math.PI * 2)
-          magneticCtx.stroke()
-        })
-        magneticCtx.setLineDash([])
+        magneticCtx.strokeStyle = 'rgba(140, 220, 255, 0.8)'
+        magneticCtx.beginPath()
+        magneticCtx.arc(0, 0, MAGNETIC_CURSOR_CIRCLE_RADIUS, 0, Math.PI * 2)
+        magneticCtx.stroke()
+        magneticCtx.restore()
       }
 
       magneticFrameId = window.requestAnimationFrame(render)
@@ -425,7 +304,51 @@ const setupCursorEffects = () => {
     magneticFrameId = window.requestAnimationFrame(render)
   }
 
+  const startMagneticHoverWaves = (element: Element) => {
+    if (!(element instanceof HTMLElement)) return
+    stopMagneticHoverWaves()
+    
+    magneticHoverTarget = element
+    
+    // Phase 1: Add magnetic field charging effect to element
+    element.style.boxShadow = '0 0 30px rgba(140, 220, 255, 0.6), 0 0 60px rgba(140, 220, 255, 0.4), inset 0 0 20px rgba(140, 220, 255, 0.2)'
+    
+    // Phase 2: After charging delay, start spawning waves
+    magneticChargeTimeout = window.setTimeout(() => {
+      // Spawn first wave
+      if (magneticHoverTarget) {
+        spawnMagneticWave(magneticHoverTarget)
+      }
+      
+      // Continue spawning waves at interval
+      magneticWaveInterval = window.setInterval(() => {
+        if (magneticHoverTarget) {
+          spawnMagneticWave(magneticHoverTarget)
+        }
+      }, MAGNETIC_WAVE_INTERVAL)
+    }, MAGNETIC_CHARGE_DELAY)
+  }
+
+  const stopMagneticHoverWaves = () => {
+    if (magneticChargeTimeout) {
+      window.clearTimeout(magneticChargeTimeout)
+      magneticChargeTimeout = undefined
+    }
+    if (magneticWaveInterval) {
+      window.clearInterval(magneticWaveInterval)
+      magneticWaveInterval = undefined
+    }
+    
+    // Remove magnetic field effect
+    if (magneticHoverTarget instanceof HTMLElement) {
+      magneticHoverTarget.style.boxShadow = ''
+    }
+    
+    magneticHoverTarget = null
+  }
+
   const stopMagneticEffect = () => {
+    stopMagneticHoverWaves()
     if (magneticFrameId !== null) {
       window.cancelAnimationFrame(magneticFrameId)
       magneticFrameId = null
@@ -474,15 +397,13 @@ const setupCursorEffects = () => {
   }
 
   const stopElectricEffect = () => {
+    stopElectricHoverArcs()
     if (electricFrameId !== null) {
       window.cancelAnimationFrame(electricFrameId)
       electricFrameId = null
     }
     electricArcs.length = 0
-    if (electricHoverInterval) {
-      window.clearInterval(electricHoverInterval)
-      electricHoverInterval = undefined
-    }
+    electricHitSparks.length = 0
     if (electricCtx) {
       electricCtx.clearRect(0, 0, electricCanvasSize.width, electricCanvasSize.height)
     }
@@ -505,7 +426,7 @@ const setupCursorEffects = () => {
 
       for (let i = electricArcs.length - 1; i >= 0; i -= 1) {
         const arc = electricArcs[i]
-        arc.life -= 0.08
+        arc.life -= 0.01
         if (arc.life <= 0) {
           electricArcs.splice(i, 1)
           continue
@@ -521,6 +442,22 @@ const setupCursorEffects = () => {
           }
         })
         electricCtx.stroke()
+      }
+
+      // Draw hit sparks
+      for (let i = electricHitSparks.length - 1; i >= 0; i -= 1) {
+        const spark = electricHitSparks[i]
+        spark.x += spark.vx
+        spark.y += spark.vy
+        spark.life -= 0.04
+        if (spark.life <= 0) {
+          electricHitSparks.splice(i, 1)
+          continue
+        }
+        electricCtx.fillStyle = `rgba(255, 255, 255, ${spark.life})`
+        electricCtx.beginPath()
+        electricCtx.arc(spark.x, spark.y, 2, 0, Math.PI * 2)
+        electricCtx.fill()
       }
 
       electricFrameId = window.requestAnimationFrame(render)
@@ -577,24 +514,127 @@ const setupCursorEffects = () => {
     }
   }
 
+  const createHitSparks = (x: number, y: number) => {
+    for (let i = 0; i < 12; i++) {
+      const angle = (Math.PI * 2 * i) / 12
+      const speed = 2 + Math.random() * 3
+      electricHitSparks.push({
+        x,
+        y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1
+      })
+    }
+  }
+
+  const dischargeFromElement = (element: Element) => {
+    if (!(element instanceof HTMLElement)) return
+    const rect = element.getBoundingClientRect()
+    
+    for (let i = 0; i < ELECTRIC_DISCHARGE_COUNT; i++) {
+      const from = getRectEdgePoint(rect)
+      const angle = Math.random() * Math.PI * 2
+      const distance = 80 + Math.random() * 120
+      const to = {
+        x: from.x + Math.cos(angle) * distance,
+        y: from.y + Math.sin(angle) * distance
+      }
+      setTimeout(() => {
+        spawnElectricArc(from, to, 4)
+      }, Math.random() * ELECTRIC_HOVER_DISCHARGE_DURATION)
+    }
+  }
+
+  const electricHoverCycle = (element: Element) => {
+    if (!(element instanceof HTMLElement)) return
+    if (electricHoverState !== 'idle' && electricHoverTarget !== element) {
+      return
+    }
+    
+    electricHoverTarget = element
+    electricHoverState = 'striking'
+    
+    // Phase 1: Strike from top
+    const rect = element.getBoundingClientRect()
+    const from = {
+      x: rect.left + rect.width / 2 + (Math.random() - 0.5) * 60,
+      y: 0
+    }
+    const to = getRectEdgePoint(rect)
+    electricHitPoint = to
+    spawnElectricArc(from, to, ELECTRIC_HOVER_SEGMENTS)
+    
+    // Phase 2: Hit effect and start charging animation
+    electricHoverTimeout = window.setTimeout(() => {
+      if (electricHitPoint) {
+        createHitSparks(electricHitPoint.x, electricHitPoint.y)
+      }
+      electricHoverState = 'hit'
+      
+      // Add charging glow to element
+      if (element instanceof HTMLElement) {
+        element.style.boxShadow = '0 0 20px rgba(220, 240, 255, 0.8), 0 0 40px rgba(180, 220, 255, 0.6), inset 0 0 20px rgba(220, 240, 255, 0.3)'
+        element.style.outline = '2px solid rgba(220, 240, 255, 0.6)'
+        element.style.outlineOffset = '2px'
+      }
+      
+      // Phase 3: Charging animation duration, then pause before discharge
+      electricHoverTimeout = window.setTimeout(() => {
+        // Pause before discharge
+        electricHoverTimeout = window.setTimeout(() => {
+          electricHoverState = 'discharging'
+          dischargeFromElement(element)
+          
+          // Phase 4: Discharge completes, then pause before removing glow
+          electricHoverTimeout = window.setTimeout(() => {
+            // Remove charging glow immediately when discharge ends
+            if (element instanceof HTMLElement) {
+              element.style.boxShadow = ''
+              element.style.outline = ''
+              element.style.outlineOffset = ''
+            }
+            
+            // Pause after discharge
+            electricHoverTimeout = window.setTimeout(() => {
+              electricHoverState = 'idle'
+              
+              if (electricHoverTarget === element) {
+                electricHoverCycle(element)
+              }
+            }, ELECTRIC_HOVER_PAUSE_AFTER_DISCHARGE)
+          }, ELECTRIC_HOVER_DISCHARGE_DURATION)
+        }, ELECTRIC_HOVER_PAUSE_BEFORE_DISCHARGE)
+      }, ELECTRIC_HOVER_CHARGE_DURATION)
+    }, ELECTRIC_HOVER_HIT_DURATION)
+  }
+
   const startElectricHoverArcs = (element: Element) => {
     if (!(element instanceof HTMLElement)) return
-    if (electricHoverInterval) {
-      window.clearInterval(electricHoverInterval)
+    stopElectricHoverArcs()
+    electricHoverCycle(element)
+  }
+
+  const stopElectricHoverArcs = () => {
+    if (electricHoverTimeout) {
+      window.clearTimeout(electricHoverTimeout)
+      electricHoverTimeout = undefined
     }
-    electricHoverInterval = window.setInterval(() => {
-      const rect = element.getBoundingClientRect()
-      const from = {
-        x: rect.left + rect.width / 2 + (Math.random() - 0.5) * 60,
-        y: 0
-      }
-      const to = getRectEdgePoint(rect)
-      spawnElectricArc(from, to, ELECTRIC_HOVER_SEGMENTS)
-    }, ELECTRIC_HOVER_INTERVAL)
+    
+    // Clear element glow
+    if (electricHoverTarget instanceof HTMLElement) {
+      electricHoverTarget.style.boxShadow = ''
+      electricHoverTarget.style.outline = ''
+      electricHoverTarget.style.outlineOffset = ''
+    }
+    
+    electricHoverState = 'idle'
+    electricHoverTarget = null
+    electricHitPoint = null
   }
 
   const handleResize = () => {
-    resizeCanvas()
+    lightCanvas.resize()
     resizeMagneticCanvas()
     resizeElectricCanvas()
   }
@@ -631,9 +671,16 @@ const setupCursorEffects = () => {
     const moveDistance = Math.hypot(moveDx, moveDy)
     lastMovePosition = { ...lastPosition }
 
+    // Check if we moved to a different element (even slow movement)
+    const currentTarget = document.elementFromPoint(lastPosition.x, lastPosition.y)
+    if (currentEffect === "light" && currentTarget !== lastTarget) {
+      lightCanvas.stopSnake()
+      lastTarget = currentTarget
+    }
+
     if (moveDistance < MIN_ACTIVE_DISTANCE && currentEffect !== "magnetic") {
       clearMovingEffect()
-      stopLightCanvas()
+      lightCanvas.stop()
       stopMagneticEffect()
       stopElectricEffect()
       scheduleStill()
@@ -644,14 +691,12 @@ const setupCursorEffects = () => {
       isMoving = true
     }
 
-    clearHoverEffect(lastTarget)
-    clearChargedHoverEffect(lastTarget)
     if (currentEffect !== "magnetic") {
       applyMovingEffect(currentEffect)
     }
 
     if (currentEffect === "light") {
-      startLightCanvas()
+      lightCanvas.start()
       const dx = lastSpawnPosition ? lastPosition.x - lastSpawnPosition.x : 0
       const dy = lastSpawnPosition ? lastPosition.y - lastSpawnPosition.y : 0
       const distance = Math.hypot(dx, dy)
@@ -660,13 +705,13 @@ const setupCursorEffects = () => {
           console.log("[Turbo‑Vecter] Trail step", { distance })
         }
         if (!lastDrawPosition) {
-          drawLightTrail(lastPosition, {
+          lightCanvas.drawTrail(lastPosition, {
             x: lastPosition.x + 0.1,
             y: lastPosition.y + 0.1
           })
         }
         if (lastDrawPosition) {
-          drawLightTrail(lastDrawPosition, lastPosition)
+          lightCanvas.drawTrail(lastDrawPosition, lastPosition)
         }
         lastDrawPosition = { ...lastPosition }
         lastSpawnPosition = { ...lastPosition }
@@ -676,7 +721,7 @@ const setupCursorEffects = () => {
         window.clearTimeout(idleTimeout)
       }
       idleTimeout = window.setTimeout(() => {
-        stopLightCanvas()
+        lightCanvas.stop()
       }, IDLE_TIMEOUT)
     }
     if (currentEffect === "magnetic") {
@@ -707,16 +752,12 @@ const setupCursorEffects = () => {
   }
 
   const handleLeave = () => {
-    clearHoverEffect(lastTarget)
-    clearChargedHoverEffect(lastTarget)
     clearMovingEffect()
-    stopLightCanvas()
+    lightCanvas.stop()
+    lightCanvas.stopSnake()
     stopMagneticEffect()
     stopElectricEffect()
     lastTarget = null
-    if (hoverChargeTimeout) {
-      window.clearTimeout(hoverChargeTimeout)
-    }
   }
 
   window.addEventListener("mousemove", handleMove, { passive: true })
@@ -729,15 +770,7 @@ const setupCursorEffects = () => {
     window.removeEventListener("mouseleave", handleLeave)
     window.removeEventListener("blur", handleLeave)
     window.removeEventListener("resize", handleResize)
-    stopLightCanvas()
-    stopMagneticEffect()
-    stopElectricEffect()
-    if (hoverChargeTimeout) {
-      window.clearTimeout(hoverChargeTimeout)
-    }
-    if (canvas?.parentElement) {
-      canvas.parentElement.removeChild(canvas)
-    }
+    lightCanvas.cleanup()
     if (magneticCanvas?.parentElement) {
       magneticCanvas.parentElement.removeChild(magneticCanvas)
     }
