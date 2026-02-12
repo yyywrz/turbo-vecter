@@ -116,10 +116,13 @@ const setupCursorEffects = () => {
     if (currentEffect !== "light") {
       lightCanvas.stop()
       lightCanvas.stopSnake()
+      lastSpawnPosition = null
+      lastDrawPosition = null
     }
     if (currentEffect !== "magnetic") {
       magneticCanvas.stop()
       magneticCanvas.stopHoverWaves()
+      lastMagneticSpawnPosition = null
     }
     if (currentEffect !== "electric") {
       electricCanvas.stop()

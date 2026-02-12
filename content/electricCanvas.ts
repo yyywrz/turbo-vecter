@@ -1,4 +1,7 @@
+import { ELECTRIC_COLORS, type ColorMode } from "./colors"
+
 const ELECTRIC_CANVAS_ID = "turbo-vecter-electric-canvas"
+const STORAGE_KEY = "turboColorMode"
 
 type Arc = {
   points: { x: number; y: number }[]
@@ -39,6 +42,7 @@ class ElectricCanvas {
   private animationFrameId: number | null = null
   private arcs: Arc[] = []
   private hitSparks: Spark[] = []
+  private colorMode: ColorMode = "dark"
 
   private hoverTarget: Element | null = null
   private hoverTimeout: number | undefined
@@ -78,7 +82,31 @@ class ElectricCanvas {
     this.styleOverlayCanvas(this.canvas)
     this.ctx = this.canvas.getContext("2d")
     this.resize()
+    this.loadColorMode()
     return this.canvas
+  }
+
+  private loadColorMode(): void {
+    const storage = globalThis.chrome?.storage?.sync ?? globalThis.chrome?.storage?.local
+    if (storage) {
+      storage.get([STORAGE_KEY], (result) => {
+        this.colorMode = result[STORAGE_KEY] || "dark"
+        if (DEBUG) {
+          console.log("[Turbo‑Vecter] Electric color mode loaded:", this.colorMode)
+        }
+      })
+
+      chrome.storage.onChanged.addListener((changes, area) => {
+        const storageArea = storage === chrome.storage.sync ? "sync" : "local"
+        if (area !== storageArea || !changes[STORAGE_KEY]) {
+          return
+        }
+        this.colorMode = changes[STORAGE_KEY].newValue || "dark"
+        if (DEBUG) {
+          console.log("[Turbo‑Vecter] Electric color mode changed:", this.colorMode)
+        }
+      })
+    }
   }
 
   private styleOverlayCanvas(target: HTMLCanvasElement): void {
@@ -128,6 +156,7 @@ class ElectricCanvas {
       this.ctx.globalCompositeOperation = "source-over"
 
       // Draw arcs
+      const colors = ELECTRIC_COLORS[this.colorMode]
       for (let i = this.arcs.length - 1; i >= 0; i -= 1) {
         const arc = this.arcs[i]
         arc.life -= 0.01
@@ -137,9 +166,9 @@ class ElectricCanvas {
         }
 
         // Draw outer glow (bright, visible halo)
-        this.ctx.shadowColor = `rgba(180, 240, 255, ${arc.life})`
+        this.ctx.shadowColor = colors.arcShadow.replace(/[\d.]+\)$/, `${arc.life})`)
         this.ctx.shadowBlur = 25
-        this.ctx.strokeStyle = `rgba(220, 245, 255, ${arc.life})`
+        this.ctx.strokeStyle = colors.arcOuter.replace(/[\d.]+\)$/, `${arc.life})`)
         this.ctx.lineWidth = 3
         this.ctx.lineCap = "round"
         this.ctx.lineJoin = "round"
@@ -155,7 +184,7 @@ class ElectricCanvas {
 
         // Draw bright core (thin, sharp)
         this.ctx.shadowBlur = 0
-        this.ctx.strokeStyle = `rgba(255, 255, 255, ${arc.life})`
+        this.ctx.strokeStyle = colors.arcCore.replace(/[\d.]+\)$/, `${arc.life})`)
         this.ctx.lineWidth = 1
         this.ctx.beginPath()
         arc.points.forEach((point, index) => {
@@ -183,16 +212,16 @@ class ElectricCanvas {
         }
 
         // Draw glow halo
-        this.ctx.shadowColor = `rgba(150, 220, 255, ${spark.life * 0.8})`
+        this.ctx.shadowColor = colors.sparkGlow.replace(/[\d.]+\)$/, `${spark.life * 0.8})`)
         this.ctx.shadowBlur = 8
-        this.ctx.fillStyle = `rgba(200, 240, 255, ${spark.life * 0.6})`
+        this.ctx.fillStyle = colors.sparkCore.replace(/[\d.]+\)$/, `${spark.life * 0.6})`)
         this.ctx.beginPath()
         this.ctx.arc(spark.x, spark.y, 4, 0, Math.PI * 2)
         this.ctx.fill()
 
         // Draw bright core
         this.ctx.shadowBlur = 0
-        this.ctx.fillStyle = `rgba(255, 255, 255, ${spark.life})`
+        this.ctx.fillStyle = colors.arcCore.replace(/[\d.]+\)$/, `${spark.life})`)
         this.ctx.beginPath()
         this.ctx.arc(spark.x, spark.y, 2, 0, Math.PI * 2)
         this.ctx.fill()
@@ -331,12 +360,12 @@ class ElectricCanvas {
         this.hoverState = 'hit'
 
         if (element instanceof HTMLElement) {
-          // Much more visible charged state with pulsing animation
-          element.style.boxShadow = '0 0 30px rgba(100, 200, 255, 1), 0 0 60px rgba(100, 200, 255, 0.8), 0 0 90px rgba(50, 150, 255, 0.6), inset 0 0 30px rgba(150, 220, 255, 0.5)'
-          element.style.outline = '3px solid rgba(150, 220, 255, 0.9)'
+          // Much more visible charged state (no animation)
+          const colors = ELECTRIC_COLORS[this.colorMode]
+          element.style.boxShadow = colors.chargedBoxShadow
+          element.style.outline = `3px solid ${colors.chargedOutline}`
           element.style.outlineOffset = '3px'
           element.style.filter = 'brightness(1.2) saturate(1.3)'
-          element.style.animation = 'turbo-vecter-electric-pulse 0.3s ease-in-out infinite alternate'
         }
 
         // Phase 3: Charging duration
@@ -356,7 +385,6 @@ class ElectricCanvas {
                       element.style.outline = ''
                       element.style.outlineOffset = ''
                       element.style.filter = ''
-                      element.style.animation = ''
                     }
 
                     // Pause after discharge
@@ -415,7 +443,6 @@ class ElectricCanvas {
       this.hoverTarget.style.outline = ''
       this.hoverTarget.style.outlineOffset = ''
       this.hoverTarget.style.filter = ''
-      this.hoverTarget.style.animation = ''
     }
 
     this.hoverState = 'idle'

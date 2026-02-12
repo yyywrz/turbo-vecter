@@ -1,4 +1,7 @@
+import { MAGNETIC_COLORS, type ColorMode } from "./colors"
+
 const MAGNETIC_CANVAS_ID = "turbo-vecter-magnetic-canvas"
+const STORAGE_KEY = "turboColorMode"
 
 type ShrinkingCircle = {
   x: number
@@ -23,7 +26,6 @@ const MAGNETIC_MAX_CIRCLES = 50 // Maximum number of circles on screen
 // Hover effect constants
 const MAGNETIC_HOVER_STAGE_DURATION = 800 // Duration of each stage in ms
 const MAGNETIC_HOVER_BORDER_WIDTH = 3
-const MAGNETIC_HOVER_BORDER_COLOR = "rgba(140, 220, 255, 0.9)"
 const MAGNETIC_HOVER_CORNER_RADIUS = 8
 const MAGNETIC_HOVER_DASH_PATTERN = [10, 6]
 const MAGNETIC_HOVER_FLOW_SPEED = 0.5 // How fast the dashes flow along the border
@@ -38,6 +40,7 @@ class MagneticCanvas {
   private canvasSize = { width: 0, height: 0 }
   private animationFrameId: number | null = null
   private circles: ShrinkingCircle[] = []
+  private colorMode: ColorMode = "dark"
 
   // Hover effect state
   private hoverTarget: Element | null = null
@@ -78,7 +81,31 @@ class MagneticCanvas {
     this.styleOverlayCanvas(this.canvas)
     this.ctx = this.canvas.getContext("2d")
     this.resize()
+    this.loadColorMode()
     return this.canvas
+  }
+
+  private loadColorMode(): void {
+    const storage = globalThis.chrome?.storage?.sync ?? globalThis.chrome?.storage?.local
+    if (storage) {
+      storage.get([STORAGE_KEY], (result) => {
+        this.colorMode = result[STORAGE_KEY] || "dark"
+        if (DEBUG) {
+          console.log("[Turbo‑Vecter] Magnetic color mode loaded:", this.colorMode)
+        }
+      })
+
+      chrome.storage.onChanged.addListener((changes, area) => {
+        const storageArea = storage === chrome.storage.sync ? "sync" : "local"
+        if (area !== storageArea || !changes[STORAGE_KEY]) {
+          return
+        }
+        this.colorMode = changes[STORAGE_KEY].newValue || "dark"
+        if (DEBUG) {
+          console.log("[Turbo‑Vecter] Magnetic color mode changed:", this.colorMode)
+        }
+      })
+    }
   }
 
   private styleOverlayCanvas(target: HTMLCanvasElement): void {
@@ -150,19 +177,13 @@ class MagneticCanvas {
           continue
         }
 
-        // Draw circle with gradient
-        const gradient = this.ctx.createRadialGradient(
-          circle.x, circle.y, 0,
-          circle.x, circle.y, circle.radius
-        )
-        gradient.addColorStop(0, `rgba(140, 220, 255, ${circle.alpha * 0.3})`)
-        gradient.addColorStop(0.7, `rgba(140, 220, 255, ${circle.alpha * 0.6})`)
-        gradient.addColorStop(1, `rgba(140, 220, 255, ${circle.alpha})`)
+        // Get colors based on mode
+        const colors = MAGNETIC_COLORS[this.colorMode]
 
         // Draw outer glow
-        this.ctx.strokeStyle = `rgba(140, 220, 255, ${circle.alpha * 0.8})`
+        this.ctx.strokeStyle = colors.circle.replace(/[\d.]+\)$/, `${circle.alpha * 0.8})`)
         this.ctx.lineWidth = 3
-        this.ctx.shadowColor = `rgba(140, 220, 255, ${circle.alpha})`
+        this.ctx.shadowColor = colors.circleGlow.replace(/[\d.]+\)$/, `${circle.alpha})`)
         this.ctx.shadowBlur = 15
         this.ctx.beginPath()
         this.ctx.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2)
@@ -170,7 +191,7 @@ class MagneticCanvas {
 
         // Draw inner ring
         this.ctx.shadowBlur = 0
-        this.ctx.strokeStyle = `rgba(200, 240, 255, ${circle.alpha})`
+        this.ctx.strokeStyle = colors.circleInner.replace(/[\d.]+\)$/, `${circle.alpha})`)
         this.ctx.lineWidth = 2
         this.ctx.beginPath()
         this.ctx.arc(circle.x, circle.y, circle.radius * 0.8, 0, Math.PI * 2)
@@ -240,7 +261,8 @@ class MagneticCanvas {
       this.hoverStageStartTime = now
     }
 
-    this.ctx.strokeStyle = MAGNETIC_HOVER_BORDER_COLOR
+    const colors = MAGNETIC_COLORS[this.colorMode]
+    this.ctx.strokeStyle = colors.border
     this.ctx.lineWidth = MAGNETIC_HOVER_BORDER_WIDTH
     this.ctx.lineCap = "round"
     this.ctx.lineJoin = "round"
@@ -293,7 +315,8 @@ class MagneticCanvas {
     this.hoverStageStartTime = performance.now()
 
     // Stage 1: Box shadow
-    element.style.boxShadow = '0 0 20px rgba(140, 220, 255, 0.6), 0 0 40px rgba(140, 220, 255, 0.4), inset 0 0 15px rgba(140, 220, 255, 0.2)'
+    const colors = MAGNETIC_COLORS[this.colorMode]
+    element.style.boxShadow = colors.boxShadow
 
     // After stage 1 duration, move to stage 2
     setTimeout(() => {

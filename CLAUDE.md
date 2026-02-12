@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Turbo-Vecter is a Plasmo-based browser extension (Manifest V3) that provides sci-fi cursor visual effects. The extension offers four effect modes (Off, Magnetic, Light, Electric) using DOM classes and full-screen canvas overlays.
+Turbo-Vecter is a Plasmo-based browser extension (Manifest V3) that provides sci-fi cursor visual effects. The extension offers four effect modes (Off, Magnetic, Light, Electric) using DOM classes and full-screen canvas overlays. It includes a color mode toggle (Dark/Light) that adapts effect colors for optimal visibility on different website backgrounds.
 
 ## Development Commands
 
@@ -45,8 +45,8 @@ Each canvas (`lightCanvas.ts`, `magneticCanvas.ts`, `electricCanvas.ts`):
 ### Popup UI
 
 - Entry: `popup.tsx` → `popup/Popup.tsx`
-- React component that syncs with `chrome.storage` for effect selection and language preference
-- Storage keys: `turboEffect`, `turboLanguage` ("en" or "zh")
+- React component that syncs with `chrome.storage` for effect selection, language preference, and color mode
+- Storage keys: `turboEffect`, `turboLanguage` ("en" or "zh"), `turboColorMode` ("dark" or "light")
 
 ## Key Patterns
 
@@ -70,9 +70,55 @@ The codebase handles extension reload gracefully:
 - `IDLE_TIMEOUT`: 2000ms - inactivity timeout before effects stop
 - `DEBUG`: boolean in `content/index.ts` for console logging
 
+## Color Mode System
+
+### Color Configuration
+- Centralized color definitions in `content/colors.ts`
+- Two color schemes: `dark` (bright cyan/blue for dark websites) and `light` (deep blue for light websites)
+- Each canvas module reads `turboColorMode` from `chrome.storage` and applies appropriate colors
+- Colors update dynamically when user switches mode in popup
+
+### Color Schemes
+**Dark Mode** (default - bright cyan/blue):
+- Magnetic: `rgba(140, 220, 255, ...)` - Bright cyan
+- Light: `rgba(160, 230, 255, ...)` - Light cyan
+- Electric: `rgba(180, 240, 255, ...)` - Very light cyan
+
+**Light Mode** (deep blue for visibility):
+- Magnetic: `rgba(0, 100, 200, ...)` - Deep blue
+- Light: `rgba(0, 120, 220, ...)` - Rich blue
+- Electric: `rgba(40, 100, 200, ...)` - Medium-dark blue
+
 ## Effect Behavior
 
-- **Moving**: CSS classes applied to `document.body` based on current effect
-- **Hovering**: Element-specific effects after cursor becomes still
+### Magnetic Effect
+- **Moving**: Spawns shrinking circles at cursor position every 25px of movement
+- **Trail**: Circles fade in from transparency, shrink concentrically, and disappear
+- **Hovering**: 5-stage animation cycle:
+  1. Box shadow (800ms)
+  2. Solid border with 8px corner radius (800ms)
+  3. Border transforms to dotted pattern with smooth transition (800ms)
+  4. Dotted pattern flows clockwise using `lineDashOffset` (800ms)
+  5. Continues flowing + adds 1.5px shake effect (stays until hover ends)
+- **Configuration**:
+  - Circle radius: 40px, shrink speed: 1.2px/frame, fade-in speed: 0.06/frame
+  - Max circles: 50, spawn distance: 25px
+  - Hover: Flow speed 0.5px/frame, shake amplitude 1.5px
+
+### Light Effect
+- **Moving**: Lightsaber-style trail drawn between cursor positions every 8px
+- **Hovering**: Snake ring animation circles around hovered element border
+- **Trail**: Gradual fade with outer glow (8px width) and inner core (3px width)
+- **Snake ring**: Travels along element perimeter, adds box-shadow after first loop
+
+### Electric Effect
+- **Moving**: Arc segments with jitter and branching (60% chance per arc)
+- **Hovering**: Lightning strike from top, hit sparks, then static charging state
+- **Charged state**: Multi-layer bright box-shadow, 3px outline with offset, brightness(1.2) + saturate(1.3) filters - no animation or pulsing
+- **Discharge**: After charging, element discharges energy outward in multiple arcs
+
+### General
 - **Scroll**: Clears hover effects to prevent visual artifacts
 - **Canvas lifecycle**: Started on movement, stopped on idle/effect change
+- **Distance-based spawning**: Both magnetic and light use movement distance tracking (not time-based)
+- **Color adaptation**: All effects read `turboColorMode` and adapt colors dynamically

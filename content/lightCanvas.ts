@@ -1,7 +1,8 @@
+import { LIGHT_COLORS, type ColorMode } from "./colors"
+
 const LIGHT_CANVAS_ID = "turbo-vecter-light-canvas"
+const STORAGE_KEY = "turboColorMode"
 const TRAIL_FADE = "rgba(0, 0, 0, 0.06)"
-const TRAIL_COLOR = "rgba(160, 230, 255, 1)"
-const TRAIL_GLOW_COLOR = "rgba(90, 180, 255, 0.9)"
 const TRAIL_WIDTH = 8
 const TRAIL_INNER_WIDTH = 3
 const DEBUG = true
@@ -15,7 +16,8 @@ class LightCanvas {
   private lastDrawPosition: { x: number; y: number } | null = null
   private debugStarted = false
   private debugDrawn = false
-  
+  private colorMode: ColorMode = "dark"
+
   private snakeAngle = 0
   private snakeFrameId: number | null = null
   private snakeElement: Element | null = null
@@ -71,9 +73,33 @@ class LightCanvas {
     if (DEBUG && !this.ctx) {
       console.warn("[Turbo‑Vecter] Canvas context not available")
     }
-    
+
     this.resize()
+    this.loadColorMode()
     return this.canvas
+  }
+
+  private loadColorMode(): void {
+    const storage = globalThis.chrome?.storage?.sync ?? globalThis.chrome?.storage?.local
+    if (storage) {
+      storage.get([STORAGE_KEY], (result) => {
+        this.colorMode = result[STORAGE_KEY] || "dark"
+        if (DEBUG) {
+          console.log("[Turbo‑Vecter] Light color mode loaded:", this.colorMode)
+        }
+      })
+
+      chrome.storage.onChanged.addListener((changes, area) => {
+        const storageArea = storage === chrome.storage.sync ? "sync" : "local"
+        if (area !== storageArea || !changes[STORAGE_KEY]) {
+          return
+        }
+        this.colorMode = changes[STORAGE_KEY].newValue || "dark"
+        if (DEBUG) {
+          console.log("[Turbo‑Vecter] Light color mode changed:", this.colorMode)
+        }
+      })
+    }
   }
 
   resize(): void {
@@ -142,21 +168,23 @@ class LightCanvas {
 
   drawTrail(from: { x: number; y: number }, to: { x: number; y: number }): void {
     if (!this.ctx) return
-    
+
+    const colors = LIGHT_COLORS[this.colorMode]
+
     this.ctx.lineCap = "round"
     this.ctx.lineJoin = "round"
 
-    this.ctx.strokeStyle = TRAIL_GLOW_COLOR
+    this.ctx.strokeStyle = colors.trailGlow
     this.ctx.lineWidth = TRAIL_WIDTH
     this.ctx.shadowBlur = 24
-    this.ctx.shadowColor = "rgba(120, 200, 255, 0.95)"
+    this.ctx.shadowColor = colors.trailShadow
     this.ctx.beginPath()
     this.ctx.moveTo(from.x, from.y)
     this.ctx.lineTo(to.x, to.y)
     this.ctx.stroke()
 
     this.ctx.shadowBlur = 0
-    this.ctx.strokeStyle = TRAIL_COLOR
+    this.ctx.strokeStyle = colors.trail
     this.ctx.lineWidth = TRAIL_INNER_WIDTH
     this.ctx.beginPath()
     this.ctx.moveTo(from.x, from.y)
@@ -228,7 +256,8 @@ class LightCanvas {
     if (!this.snakeCompletedFirstLoop && this.snakeAngle >= perimeter) {
       this.snakeCompletedFirstLoop = true
       if (element instanceof HTMLElement) {
-        element.style.boxShadow = "0 0 20px rgba(100, 200, 255, 0.6), 0 0 40px rgba(100, 200, 255, 0.3)"
+        const colors = LIGHT_COLORS[this.colorMode]
+        element.style.boxShadow = colors.boxShadow
       }
     }
     
@@ -258,21 +287,23 @@ class LightCanvas {
     this.ctx.lineCap = "round"
     this.ctx.lineJoin = "round"
     
+    const colors = LIGHT_COLORS[this.colorMode]
+
     for (let i = 0; i < segments; i++) {
       const t = i / segments
       const distance = headPosition - t * trailLength
       const nextDistance = headPosition - (i + 1) / segments * trailLength
-      
+
       const p1 = getPointOnBorder(distance)
       const p2 = getPointOnBorder(nextDistance)
-      
+
       // Smooth fade from head to tail
       const alpha = Math.pow(1 - t, 1.2)
-      
-      this.ctx.strokeStyle = `rgba(100, 200, 255, ${alpha})`
+
+      this.ctx.strokeStyle = colors.snakeRing.replace(/[\d.]+\)$/, `${alpha})`)
       this.ctx.lineWidth = 3
       this.ctx.globalAlpha = alpha
-      
+
       this.ctx.beginPath()
       this.ctx.moveTo(p1.x, p1.y)
       this.ctx.lineTo(p2.x, p2.y)
